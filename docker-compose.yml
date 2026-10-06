@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+      JOB_TTL_SECONDS: ${JOB_TTL_SECONDS:-3600}
+      MAX_ZIP_ENTRIES: ${MAX_ZIP_ENTRIES:-10000}
+      MAX_UNCOMPRESSED_BYTES: ${MAX_UNCOMPRESSED_BYTES:-524288000}
+      MAX_COMPRESSION_RATIO: ${MAX_COMPRESSION_RATIO:-250}
+    restart: unless-stopped

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+client/node_modules/
+client/dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local config
+.env
+.env.*
+!.env.example
+
+# Presentations / generated files
+*.pptx
+*.pptm
+*_RU_FIXED.*
+
+# Coverage
+.coverage
+htmlcov/

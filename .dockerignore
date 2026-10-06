@@ -1,0 +1,9 @@
+.git
+.github
+**/__pycache__
+**/.pytest_cache
+client/node_modules
+client/dist
+*.pptx
+*.pptm
+*.zip
