@@ -1,6 +1,20 @@
 import type { ProofingJob } from './types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
+export interface ProofingServiceConfig {
+  max_upload_bytes: number
+  supported_extensions: string[]
+  max_concurrent_jobs: number
+}
+
+export interface ProofingApiOptions {
+  credentials?: RequestCredentials
+}
+
+const ENV_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
+
+function normalizeBase(apiBase?: string): string {
+  return (apiBase ?? ENV_API_BASE).replace(/\/$/, '')
+}
 
 function responseError(status: number, payload: unknown): string {
   if (payload && typeof payload === 'object') {
@@ -11,17 +25,21 @@ function responseError(status: number, payload: unknown): string {
   return `HTTP ${status}`
 }
 
-export function createJob(
-  file: File,
-  onUploadProgress?: (percent: number) => void,
-): Promise<ProofingJob> {
-  return new Promise((resolve, reject) => {
+export function createProofingApi(apiBase?: string, options: ProofingApiOptions = {}) {
+  const base = normalizeBase(apiBase)
+  const credentials = options.credentials ?? 'same-origin'
+
+  const createJob = (
+    file: File,
+    onUploadProgress?: (percent: number) => void,
+  ): Promise<ProofingJob> => new Promise((resolve, reject) => {
     const form = new FormData()
     form.append('file', file)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${API_BASE}/api/jobs`)
+    xhr.open('POST', `${base}/api/jobs`)
     xhr.responseType = 'json'
+    xhr.withCredentials = credentials === 'include'
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onUploadProgress) return
@@ -40,22 +58,49 @@ export function createJob(
     xhr.onabort = () => reject(new Error('Upload was cancelled.'))
     xhr.send(form)
   })
-}
 
-export async function getJob(jobId: string): Promise<ProofingJob> {
-  const response = await fetch(`${API_BASE}/api/jobs/${jobId}`, { cache: 'no-store' })
-  if (!response.ok) {
-    let payload: unknown = null
-    try {
-      payload = await response.json()
-    } catch {
-      // no-op
+  const getJob = async (jobId: string): Promise<ProofingJob> => {
+    const response = await fetch(`${base}/api/jobs/${jobId}`, {
+      cache: 'no-store',
+      credentials,
+    })
+    if (!response.ok) {
+      let payload: unknown = null
+      try {
+        payload = await response.json()
+      } catch {
+        // no-op
+      }
+      throw new Error(responseError(response.status, payload))
     }
-    throw new Error(responseError(response.status, payload))
+    return response.json()
   }
-  return response.json()
-}
 
-export function downloadUrl(jobId: string): string {
-  return `${API_BASE}/api/jobs/${jobId}/download`
+  const getConfig = async (): Promise<ProofingServiceConfig> => {
+    const response = await fetch(`${base}/api/config`, {
+      cache: 'no-store',
+      credentials,
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.json()
+  }
+
+  const downloadJob = async (jobId: string): Promise<Blob> => {
+    const response = await fetch(`${base}/api/jobs/${jobId}/download`, {
+      cache: 'no-store',
+      credentials,
+    })
+    if (!response.ok) {
+      let payload: unknown = null
+      try {
+        payload = await response.json()
+      } catch {
+        // no-op
+      }
+      throw new Error(responseError(response.status, payload))
+    }
+    return response.blob()
+  }
+
+  return { createJob, getJob, getConfig, downloadJob }
 }
