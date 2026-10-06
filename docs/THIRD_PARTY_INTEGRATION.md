@@ -1,15 +1,15 @@
-# React / AI-hub integration
+# React / third-party service integration
 
-The recommended integration is to use the React component directly in the AI-hub UI and proxy the backend API through the AI-hub origin.
+The recommended integration is to use the React component directly in a third-party service UI and proxy the backend API through that service's origin.
 
 ## Preferred architecture
 
 ```text
-AI-hub React UI
+Third-party React UI
    |
    | /tools/pptx-proofing/api/*
    v
-AI-hub reverse proxy / gateway
+Third-party service reverse proxy / gateway
    |
    v
 Force RussianProofing4PPTX service
@@ -17,10 +17,10 @@ Force RussianProofing4PPTX service
 
 This model has several advantages:
 
-- the browser remains on the authenticated AI-hub origin;
+- the browser remains on the authenticated third-party service origin;
 - no separate login is required;
 - CORS can be disabled for the proofing service;
-- corporate authorization, audit, WAF and request policies remain centralized;
+- authorization, audit, WAF and request policies can remain centralized in the host service;
 - PPTX files do not need to be exposed through a separate public endpoint.
 
 ## React component
@@ -79,7 +79,7 @@ The same-origin proxy variant is preferred.
 
 ### `credentials`
 
-Defaults to `same-origin`. Use `include` only if a deliberately configured cross-origin corporate authentication flow requires cookies.
+Defaults to `same-origin`. Use `include` only if a deliberately configured cross-origin authentication flow requires cookies.
 
 ### `maxFileSizeBytes`
 
@@ -87,7 +87,7 @@ Optional UI override. If omitted, the component reads `/api/config` from the ser
 
 ## Reverse proxy mapping
 
-The AI-hub proxy should map:
+The host service proxy should map:
 
 ```text
 /tools/pptx-proofing/api/health
@@ -111,7 +111,7 @@ The upload route must allow the configured body size and a processing/download t
 
 ## Authentication boundary
 
-The proofing service currently trusts the upstream authenticated environment. If AI-hub performs authentication, do not expose the backend container directly to user networks. Allow access only from the AI-hub gateway/reverse proxy network.
+The proofing service currently trusts the upstream authenticated environment. If the surrounding third-party service performs authentication, do not expose the backend container directly to user networks. Allow access only from the host service gateway/reverse proxy network.
 
 If later per-user audit is required, the gateway can inject a signed internal user identifier header. The proofing service should not trust arbitrary identity headers from the public/user-facing network.
 

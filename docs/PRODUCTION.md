@@ -5,7 +5,7 @@ This document describes the recommended production deployment for **Force Russia
 ## Recommended topology
 
 ```text
-Browser / AI-hub
+Browser / third-party service
        |
        | HTTPS
        v
@@ -59,10 +59,10 @@ At minimum set:
 ```dotenv
 SERVER_NAME=pptx-proofing.company.local
 ALLOWED_HOSTS=pptx-proofing.company.local,app,localhost,127.0.0.1
-CORS_ORIGINS=https://pptx-proofing.company.local,https://ai-hub.company.local
+CORS_ORIGINS=https://pptx-proofing.company.local,https://host-service.company.local
 ```
 
-For the recommended same-origin AI-hub proxy integration, `CORS_ORIGINS` can be left empty because the browser talks only to the AI-hub origin.
+For the recommended same-origin third-party service proxy integration, `CORS_ORIGINS` can be left empty because the browser talks only to the host service origin.
 
 ### Processing limits
 
@@ -208,7 +208,7 @@ The production Compose stack adds the following controls:
 
 Authentication and authorization should be supplied by the surrounding corporate platform:
 
-1. preferred: AI-hub authenticates the user and reverse-proxies this service under the same origin;
+1. preferred: the surrounding third-party service authenticates the user and reverse-proxies this service under the same origin;
 2. acceptable: corporate ingress authenticates requests using SSO/OIDC before forwarding them;
 3. not recommended: direct anonymous access to the service from outside a trusted network.
 
