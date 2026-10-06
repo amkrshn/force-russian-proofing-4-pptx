@@ -1,8 +1,17 @@
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createJob, downloadUrl, getJob } from '../api'
+import { createProofingApi } from '../api'
 import type { ProofingJob } from '../types'
+import './RussianProofingUploader.css'
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024
+const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024
+
+export interface RussianProofingUploaderProps {
+  apiBase?: string
+  credentials?: RequestCredentials
+  maxFileSizeBytes?: number
+  onReady?: (job: ProofingJob) => void
+  onError?: (message: string) => void
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -21,14 +30,46 @@ function isSupported(file: File): boolean {
   return name.endsWith('.pptx') || name.endsWith('.pptm')
 }
 
-export function RussianProofingUploader() {
+export function RussianProofingUploader({
+  apiBase,
+  credentials = 'same-origin',
+  maxFileSizeBytes,
+  onReady,
+  onError,
+}: RussianProofingUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const api = useMemo(() => createProofingApi(apiBase, { credentials }), [apiBase, credentials])
+  const [serverMaxFileSize, setServerMaxFileSize] = useState<number | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [job, setJob] = useState<ProofingJob | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+
+  const effectiveMaxFileSize = maxFileSizeBytes ?? serverMaxFileSize ?? DEFAULT_MAX_FILE_SIZE
+
+  useEffect(() => {
+    let cancelled = false
+    api.getConfig()
+      .then((config) => {
+        if (!cancelled && Number.isFinite(config.max_upload_bytes)) {
+          setServerMaxFileSize(config.max_upload_bytes)
+        }
+      })
+      .catch(() => {
+        // Keep the local default if config is unavailable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api])
+
+  const reportError = useCallback((message: string) => {
+    setError(message)
+    onError?.(message)
+  }, [onError])
 
   const progress = job
     ? Math.min(100, Math.round(15 + job.progress * 0.85))
@@ -59,16 +100,16 @@ export function RussianProofingUploader() {
     }
     if (!isSupported(candidate)) {
       setFile(null)
-      setError('Поддерживаются только файлы .pptx и .pptm.')
+      reportError('Поддерживаются только файлы .pptx и .pptm.')
       return
     }
-    if (candidate.size > MAX_FILE_SIZE) {
+    if (candidate.size > effectiveMaxFileSize) {
       setFile(null)
-      setError('Размер файла превышает 100 МБ.')
+      reportError(`Размер файла превышает лимит ${formatBytes(effectiveMaxFileSize)}.`)
       return
     }
     setFile(candidate)
-  }, [])
+  }, [effectiveMaxFileSize, reportError])
 
   const onInput = (event: ChangeEvent<HTMLInputElement>) => {
     acceptFile(event.target.files?.[0] ?? null)
@@ -85,10 +126,10 @@ export function RussianProofingUploader() {
     setBusy(true)
     setError('')
     try {
-      const created = await createJob(file, setUploadProgress)
+      const created = await api.createJob(file, setUploadProgress)
       setJob(created)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить файл.')
+      reportError(err instanceof Error ? err.message : 'Не удалось отправить файл.')
       setBusy(false)
     }
   }
@@ -99,7 +140,7 @@ export function RussianProofingUploader() {
     let cancelled = false
     const timer = window.setInterval(async () => {
       try {
-        const updated = await getJob(job.id)
+        const updated = await api.getJob(job.id)
         if (cancelled) return
         setJob(updated)
         if (updated.state === 'ready' || updated.state === 'error') {
@@ -108,38 +149,64 @@ export function RussianProofingUploader() {
         }
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Не удалось получить состояние задачи.')
+        reportError(err instanceof Error ? err.message : 'Не удалось получить состояние задачи.')
         setBusy(false)
         window.clearInterval(timer)
       }
-    }, 500)
+    }, 650)
 
     return () => {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [job?.id, job?.state])
+  }, [api, job?.id, job?.state, reportError])
+
+  useEffect(() => {
+    if (job?.state === 'ready') onReady?.(job)
+  }, [job?.id, job?.state, onReady])
+
+  const download = async () => {
+    if (!job || job.state !== 'ready' || downloading) return
+    setDownloading(true)
+    setError('')
+    try {
+      const blob = await api.downloadJob(job.id)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = job.output_name
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      reportError(err instanceof Error ? err.message : 'Не удалось скачать исправленный файл.')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const reset = () => {
     setFile(null)
     setJob(null)
     setError('')
     setBusy(false)
+    setDownloading(false)
     setUploadProgress(0)
     if (inputRef.current) inputRef.current.value = ''
   }
 
   return (
-    <section className="tool-card" aria-labelledby="tool-title">
-      <div className="eyebrow">PowerPoint OOXML proofing utility</div>
-      <h1 id="tool-title">Force RussianProofing4PPTX</h1>
-      <p className="lead">
+    <section className="frp-tool-card" aria-labelledby="frp-tool-title">
+      <div className="frp-eyebrow">PowerPoint OOXML proofing utility</div>
+      <h1 className="frp-title" id="frp-tool-title">Force RussianProofing4PPTX</h1>
+      <p className="frp-lead">
         Загружает презентацию на сервер, устанавливает для текстовых run-параметров язык
         <strong> ru-RU</strong>, очищает старый кэш ошибок проверки и помечает текст для повторной проверки PowerPoint.
       </p>
 
       <div
-        className={`drop-zone ${dragActive ? 'drag-active' : ''} ${file ? 'has-file' : ''}`}
+        className={`frp-drop-zone ${dragActive ? 'frp-drag-active' : ''} ${file ? 'frp-has-file' : ''}`}
         onDragEnter={(event) => {
           event.preventDefault()
           setDragActive(true)
@@ -155,70 +222,70 @@ export function RussianProofingUploader() {
         }}
       >
         <input ref={inputRef} type="file" accept=".pptx,.pptm" hidden onChange={onInput} />
-        <div className="file-icon" aria-hidden="true">P</div>
+        <div className="frp-file-icon" aria-hidden="true">P</div>
         {file ? (
-          <div className="file-meta">
+          <div className="frp-file-meta">
             <strong>{file.name}</strong>
             <span>{formatBytes(file.size)}</span>
           </div>
         ) : (
-          <div className="file-meta">
+          <div className="frp-file-meta">
             <strong>Перетащите PPTX сюда</strong>
-            <span>или нажмите для выбора файла · максимум 100 МБ</span>
+            <span>или нажмите для выбора файла · максимум {formatBytes(effectiveMaxFileSize)}</span>
           </div>
         )}
       </div>
 
       {(job || busy) && (
-        <div className="progress-panel" aria-live="polite">
-          <div className="progress-head">
+        <div className="frp-progress-panel" aria-live="polite">
+          <div className="frp-progress-head">
             <div>
-              <span className="status-label">{statusText}</span>
-              <span className="current-part">{job?.current_part || 'Загрузка презентации'}</span>
+              <span className="frp-status-label">{statusText}</span>
+              <span className="frp-current-part">{job?.current_part || 'Загрузка презентации'}</span>
             </div>
             <strong>{progress}%</strong>
           </div>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${Math.max(progress, 3)}%` }} />
+          <div className="frp-progress-track">
+            <div className="frp-progress-fill" style={{ width: `${Math.max(progress, 3)}%` }} />
           </div>
         </div>
       )}
 
-      {error && <div className="message error-message">{error}</div>}
-      {job?.state === 'error' && (
-        <div className="message error-message">{job.error || 'Ошибка обработки.'}</div>
+      {error && <div className="frp-message frp-error-message">{error}</div>}
+      {job?.state === 'error' && !error && (
+        <div className="frp-message frp-error-message">{job.error || 'Ошибка обработки.'}</div>
       )}
 
       {isReady && job && (
-        <div className="result-panel">
+        <div className="frp-result-panel">
           <div>
-            <div className="result-title">Готово</div>
-            <div className="result-file">{job.output_name}</div>
+            <div className="frp-result-title">Готово</div>
+            <div className="frp-result-file">{job.output_name}</div>
           </div>
-          <div className="stats-grid">
+          <div className="frp-stats-grid">
             <div><span>XML изменено</span><strong>{job.stats.xml_parts_changed ?? 0}</strong></div>
             <div><span>Язык изменён</span><strong>{job.stats.lang_changed ?? 0}</strong></div>
             <div><span>Кэш ошибок очищен</span><strong>{job.stats.err_removed ?? 0}</strong></div>
             <div><span>rPr добавлено</span><strong>{job.stats.missing_rpr_inserted ?? 0}</strong></div>
           </div>
-          <p className="result-note">
+          <p className="frp-result-note">
             После открытия исправленного файла PowerPoint повторно проверит текст по русскому словарю. После проверки сохраните презентацию один раз.
           </p>
         </div>
       )}
 
-      <div className="actions">
+      <div className="frp-actions">
         {!isReady ? (
-          <button className="primary" type="button" disabled={!file || busy} onClick={start}>
+          <button className="frp-primary" type="button" disabled={!file || busy} onClick={start}>
             {busy ? 'Обработка…' : 'Исправить презентацию'}
           </button>
         ) : (
-          <a className="primary button-link" href={downloadUrl(job!.id)} download={job!.output_name}>
-            Скачать исправленный файл
-          </a>
+          <button className="frp-primary" type="button" disabled={downloading} onClick={download}>
+            {downloading ? 'Скачивание…' : 'Скачать исправленный файл'}
+          </button>
         )}
         {(file || job) && (
-          <button className="secondary" type="button" disabled={busy} onClick={reset}>
+          <button className="frp-secondary" type="button" disabled={busy || downloading} onClick={reset}>
             Новый файл
           </button>
         )}

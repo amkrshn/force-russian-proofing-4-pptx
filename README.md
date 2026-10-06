@@ -37,6 +37,12 @@ docker compose up --build
 http://localhost:8000
 ```
 
+## Production deployment
+
+Production-стек с Nginx, HTTPS, ограничениями загрузки и hardening находится в `docker-compose.prod.yml`. Пошаговая инструкция: [docs/PRODUCTION.md](docs/PRODUCTION.md).
+
+Для встраивания React-модуля в корпоративный AI-hub используйте [docs/AI_HUB_INTEGRATION.md](docs/AI_HUB_INTEGRATION.md). Предпочтительная схема — same-origin reverse proxy через уже аутентифицированный AI-hub.
+
 ## Локальная разработка
 
 ### Backend
@@ -101,7 +107,9 @@ Health check сервиса.
 client/src/components/RussianProofingUploader.tsx
 ```
 
-Он изолирован от `App.tsx` и может быть перенесён в существующий React-проект. API base можно задать через:
+Он изолирован от `App.tsx`, использует CSS-классы с префиксом `frp-` и экспортируется через `client/src/components/index.ts`. Компонент принимает `apiBase`, `credentials`, `maxFileSizeBytes`, `onReady` и `onError`.
+
+Для standalone-сборки API base также можно задать через:
 
 ```text
 VITE_API_BASE=https://your-api.example.com
@@ -115,10 +123,13 @@ VITE_API_BASE=https://your-api.example.com
 |---|---:|---|
 | `MAX_UPLOAD_BYTES` | 104857600 | Максимальный размер загружаемого файла |
 | `JOB_TTL_SECONDS` | 3600 | Время жизни временной задачи |
+| `MAX_CONCURRENT_JOBS` | 2 | Максимум одновременно обрабатываемых презентаций в одном worker |
 | `MAX_ZIP_ENTRIES` | 10000 | Защита от аномально больших ZIP-пакетов |
 | `MAX_UNCOMPRESSED_BYTES` | 524288000 | Лимит суммарного распакованного объёма |
 | `MAX_COMPRESSION_RATIO` | 250 | Ограничение подозрительного compression ratio |
-| `CORS_ORIGINS` | `http://localhost:5173` | Origins для dev frontend |
+| `CORS_ORIGINS` | `http://localhost:5173` | Разрешённые browser origins; для same-origin proxy может быть пустым |
+| `ALLOWED_HOSTS` | `*` | Разрешённые Host headers для TrustedHostMiddleware |
+| `ENABLE_DOCS` | dev: true / prod: false | Включение FastAPI Swagger/ReDoc |
 | `STATIC_DIR` | `/app/static` | Каталог production React build |
 
 ## Безопасность и хранение файлов
@@ -130,7 +141,7 @@ VITE_API_BASE=https://your-api.example.com
 - выполняются базовые проверки ZIP-пакета, размера, количества entries и compression ratio;
 - сервер не запускает макросы и не требует установленного Microsoft Office.
 
-Для production с несколькими worker/репликами in-memory `JobManager` нужно заменить на общее хранилище состояния (например Redis) и shared/object storage для временных файлов. Текущий Docker-конфиг намеренно запускает **1 worker**.
+Production-конфигурация намеренно запускает **1 Uvicorn worker**, но ограничивает параллельную обработку через `MAX_CONCURRENT_JOBS`. Для нескольких worker/реплик in-memory `JobManager` нужно заменить на общее хранилище состояния (например Redis) и shared/object storage для временных файлов.
 
 ## Ограничения
 
