@@ -11,31 +11,53 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .jobs import JobManager
 from .processor import PresentationValidationError, process_presentation, validate_presentation_package
 
 APP_NAME = "Force RussianProofing4PPTX"
+APP_VERSION = "1.1.0"
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "3600"))
+MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_JOBS", "2")))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "/app/static"))
+ENABLE_DOCS = os.getenv(
+    "ENABLE_DOCS", "false" if ENVIRONMENT == "production" else "true"
+).strip().lower() in {"1", "true", "yes", "on"}
 
-app = FastAPI(title=APP_NAME, version="1.0.0")
+app = FastAPI(
+    title=APP_NAME,
+    version=APP_VERSION,
+    docs_url="/docs" if ENABLE_DOCS else None,
+    redoc_url="/redoc" if ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_DOCS else None,
+)
 manager = JobManager(ttl_seconds=JOB_TTL_SECONDS)
 processing_tasks: set[asyncio.Task] = set()
+processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+allowed_hosts = [
+    item.strip()
+    for item in os.getenv("ALLOWED_HOSTS", "*").split(",")
+    if item.strip()
+]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
 
 origins = [
     item.strip()
     for item in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
     if item.strip()
 ]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+if origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
 
 def sanitize_filename(name: str) -> str:
@@ -86,9 +108,28 @@ def run_processing(job_id: str) -> None:
         )
 
 
+async def run_processing_limited(job_id: str) -> None:
+    async with processing_semaphore:
+        await asyncio.to_thread(run_processing, job_id)
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": APP_NAME}
+    return {
+        "status": "ok",
+        "service": APP_NAME,
+        "version": APP_VERSION,
+        "environment": ENVIRONMENT,
+    }
+
+
+@app.get("/api/config")
+def config() -> dict:
+    return {
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "supported_extensions": [".pptx", ".pptm"],
+        "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
+    }
 
 
 @app.post("/api/jobs", status_code=202)
@@ -120,7 +161,7 @@ async def create_job(file: UploadFile = File(...)) -> dict:
         except PresentationValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        task = asyncio.create_task(asyncio.to_thread(run_processing, job.id))
+        task = asyncio.create_task(run_processing_limited(job.id))
         processing_tasks.add(task)
         task.add_done_callback(processing_tasks.discard)
         return job.public()
@@ -163,6 +204,7 @@ def download_job(job_id: str) -> FileResponse:
     headers = {
         "X-Proofing-Language": "ru-RU",
         "X-Proofing-Stats": quote(str(job.stats)),
+        "Cache-Control": "no-store",
     }
     return FileResponse(
         output_path,
