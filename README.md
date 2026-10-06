@@ -41,7 +41,7 @@ http://localhost:8000
 
 Production-стек с Nginx, HTTPS, ограничениями загрузки и hardening находится в `docker-compose.prod.yml`. Пошаговая инструкция: [docs/PRODUCTION.md](docs/PRODUCTION.md).
 
-Для встраивания React-модуля в корпоративный AI-hub используйте [docs/AI_HUB_INTEGRATION.md](docs/AI_HUB_INTEGRATION.md). Предпочтительная схема — same-origin reverse proxy через уже аутентифицированный AI-hub.
+Для встраивания React-модуля в сторонний сервис используйте [docs/THIRD_PARTY_INTEGRATION.md](docs/THIRD_PARTY_INTEGRATION.md). Предпочтительная схема — same-origin reverse proxy через уже аутентифицированный внешний сервис.
 
 ## Локальная разработка
 
