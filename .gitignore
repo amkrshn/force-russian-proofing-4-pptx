@@ -28,3 +28,9 @@ Thumbs.db
 # Coverage
 .coverage
 htmlcov/
+
+# Production secrets / certificates
+deploy/.env.prod
+deploy/certs/*
+!deploy/certs/.gitkeep
+!deploy/certs/README.md
